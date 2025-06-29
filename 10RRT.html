@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Simple RRT Path Planner</title>
+  <style>
+    canvas { border: 1px solid black; }
+    #controls { margin-top: 10px; display: flex; gap: 20px; }
+    #outputPanel, #randomPanel { font-family: monospace; }
+  </style>
+</head>
+<body>
+<canvas id="canvas" width="500" height="500"></canvas>
+<div id="controls">
+  <div>
+    <button id="stepBtn">Add Node</button>
+    <button id="downloadBtn" disabled>Download Path</button>
+  </div>
+  <div id="outputPanel">
+    <strong>Final Path:</strong>
+    <pre id="output"></pre>
+    <div><strong>Distance:</strong> <span id="distance"></span></div>
+  </div>
+  <div id="randomPanel">
+    <strong>Last Random Point:</strong>
+    <pre id="randPoint"></pre>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const stepBtn = document.getElementById("stepBtn");
+const output = document.getElementById("output");
+const distanceLabel = document.getElementById("distance");
+const randPointDisplay = document.getElementById("randPoint");
+const downloadBtn = document.getElementById("downloadBtn");
+
+const width = canvas.width;
+const height = canvas.height;
+const gridSize = 10;
+const unit = width / gridSize;
+const stepSize = 1;
+
+const start = { x: 1, y: 1 };
+const goal = { x: 9, y: 9 };
+const obstacle = { x: 5, y: 5, r: 2 };
+
+let tree = [{ x: start.x, y: start.y, parent: null }];
+let finalPath = [];
+let pathFound = false;
+let tempLine = null;
+let tempLineVisible = false;
+let lastRandPoint = null;
+
+function drawCircle(p, r, color, fill = true) {
+  ctx.beginPath();
+  ctx.arc(p.x * unit, p.y * unit, r * unit, 0, 2 * Math.PI);
+  if (fill) {
+    ctx.fillStyle = color;
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  }
+}
+
+function drawGrid() {
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#ccc";
+  ctx.font = "10px Arial";
+  ctx.fillStyle = "black";
+
+  for (let i = 0; i <= gridSize; i++) {
+    const pos = i * unit;
+    ctx.beginPath();
+    ctx.moveTo(pos, 0);
+    ctx.lineTo(pos, height);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, pos);
+    ctx.lineTo(width, pos);
+    ctx.stroke();
+
+    if (i < gridSize) {
+      ctx.fillText(i.toString(), pos + 2, 10);
+      ctx.fillText(i.toString(), 2, pos + 10);
+    }
+  }
+  drawCircle(obstacle, obstacle.r, "rgba(255,0,0,0.3)");
+  drawCircle(start, 0.2, "green");
+  drawCircle(goal, 0.2, "red");
+}
+
+function isCollision(x1, y1, x2, y2) {
+  const steps = 10;
+  for (let i = 0; i <= steps; i++) {
+    let x = x1 + (x2 - x1) * (i / steps);
+    let y = y1 + (y2 - y1) * (i / steps);
+    let dx = x - obstacle.x;
+    let dy = y - obstacle.y;
+    if (Math.sqrt(dx * dx + dy * dy) < obstacle.r) return true;
+  }
+  return false;
+}
+
+function getNearestNode(p) {
+  let minDist = Infinity;
+  let nearest = null;
+  for (const node of tree) {
+    const dist = Math.hypot(p.x - node.x, p.y - node.y);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = node;
+    }
+  }
+  return nearest;
+}
+
+function stepRRT() {
+  if (pathFound) return;
+
+  const rand = {
+    x: Math.random() * gridSize,
+    y: Math.random() * gridSize
+  };
+  lastRandPoint = rand;
+  randPointDisplay.textContent = `(${rand.x.toFixed(2)}, ${rand.y.toFixed(2)})`;
+
+  const nearest = getNearestNode(rand);
+  tempLine = { from: nearest, to: rand };
+  tempLineVisible = true;
+
+  const dx = rand.x - nearest.x;
+  const dy = rand.y - nearest.y;
+  const dist = Math.hypot(dx, dy);
+  const scale = stepSize / dist;
+  const newX = nearest.x + dx * scale;
+  const newY = nearest.y + dy * scale;
+
+  if (isCollision(nearest.x, nearest.y, newX, newY)) {
+    draw();
+    return;
+  }
+
+  const newNode = { x: newX, y: newY, parent: nearest };
+  tree.push(newNode);
+
+  const toGoal = Math.hypot(goal.x - newX, goal.y - newY);
+  if (toGoal <= stepSize && !isCollision(newX, newY, goal.x, goal.y)) {
+    const goalNode = { x: goal.x, y: goal.y, parent: newNode };
+    tree.push(goalNode);
+    pathFound = true;
+    stepBtn.disabled = true;
+    downloadBtn.disabled = false;
+
+    const path = [];
+    let node = goalNode;
+    let totalDist = 0;
+    while (node) {
+      path.unshift({ x: node.x, y: node.y });
+      if (node.parent) {
+        totalDist += Math.hypot(node.x - node.parent.x, node.y - node.parent.y);
+      }
+      node = node.parent;
+    }
+    finalPath = path;
+    distanceLabel.textContent = totalDist.toFixed(2);
+    output.textContent = path.map(p => `(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`).join("\n");
+  }
+
+  draw();
+}
+
+function draw() {
+  drawGrid();
+
+  for (const node of tree) {
+    if (node.parent) {
+      ctx.beginPath();
+      ctx.moveTo(node.x * unit, node.y * unit);
+      ctx.lineTo(node.parent.x * unit, node.parent.y * unit);
+      ctx.strokeStyle = "black";
+      ctx.stroke();
+    }
+  }
+
+  if (tempLineVisible && tempLine) {
+    ctx.beginPath();
+    ctx.moveTo(tempLine.from.x * unit, tempLine.from.y * unit);
+    ctx.lineTo(tempLine.to.x * unit, tempLine.to.y * unit);
+    ctx.strokeStyle = "green";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  if (finalPath.length > 0) {
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(finalPath[0].x * unit, finalPath[0].y * unit);
+    for (let i = 1; i < finalPath.length; i++) {
+      ctx.lineTo(finalPath[i].x * unit, finalPath[i].y * unit);
+    }
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+}
+
+function downloadPath() {
+  const pathText = finalPath.map(p => `(${p.x.toFixed(2)}, ${p.y.toFixed(2)})`).join("\n");
+  const blob = new Blob([pathText], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "rrt_path.txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+stepBtn.onclick = () => {
+  tempLineVisible = false;
+  stepRRT();
+};
+downloadBtn.onclick = downloadPath;
+draw();
+</script>
+</body>
+</html>
